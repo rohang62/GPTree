@@ -68,9 +68,6 @@ async def create_conversation(
     title: str,
     model: str = "gpt-4.1",
     temperature: float = 0.7,
-    is_side_thread: bool = False,
-    parent_message_id: Optional[str] = None,
-    parent_conversation_id: Optional[str] = None,
 ):
     """Create a new conversation"""
     try:
@@ -83,13 +80,8 @@ async def create_conversation(
             "title": title,
             "model": model,
             "temperature": temperature,
-            "is_side_thread": is_side_thread,
+            "is_side_thread": False,
         }
-        
-        if parent_message_id:
-            insert_data["parent_message_id"] = parent_message_id
-        if parent_conversation_id:
-            insert_data["parent_conversation_id"] = parent_conversation_id
         
         response = supabase.table("conversations")\
             .insert(insert_data)\
