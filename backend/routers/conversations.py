@@ -66,7 +66,7 @@ async def get_conversations(
 async def create_conversation(
     user_id: str,
     title: str,
-    model: str = "gpt-4",
+    model: str = "gpt-4.1",
     temperature: float = 0.7,
     is_side_thread: bool = False,
     parent_message_id: Optional[str] = None,
@@ -138,7 +138,7 @@ async def create_side_thread(payload: SideThreadCreate):
                 "conversation_id": side_thread_id,
                 "user_id": payload.user_id,
                 "title": side_thread_title,
-                "model": "RohanGPT",  # Default model
+                "model": "gpt-4.1",  # Default model
                 "temperature": 0.7,  # Default temperature
                 "is_side_thread": True,
                 "parent_message_id": payload.parent_message_id,

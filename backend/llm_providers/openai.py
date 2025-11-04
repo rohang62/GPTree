@@ -21,7 +21,7 @@ def get_client() -> AsyncOpenAI:
 
 async def stream_chat(
     messages: List[Dict[str, str]],
-    model: str = "gpt-4",
+    model: str = "gpt-4.1",
     temperature: float = 0.7,
     top_p: float = 1.0,
 ) -> AsyncGenerator[str, None]:
@@ -51,27 +51,56 @@ async def stream_chat(
 
 async def generate_title(messages: List[Dict[str, str]]) -> str:
     """
-    Generate a short title for a conversation based on the first user message.
-    
-    Returns a simplified title (first few words of the user message).
+    Ask the LLM to produce a concise conversation title using the first user
+    message and the first assistant reply. Falls back to a heuristic if the
+    provider call fails. Always returns a short string (<= 8 words) without
+    quotes or trailing punctuation.
     """
     if not messages:
         return "New Chat"
-    
-    # Find first user message
-    user_msg = next((m for m in messages if m.get("role") == "user"), None)
-    if not user_msg:
+
+    # Extract first user and first assistant contents
+    first_user = next((m for m in messages if m.get("role") == "user" and m.get("content")), None)
+    first_assistant = next((m for m in messages if m.get("role") == "assistant" and m.get("content")), None)
+
+    user_text = (first_user or {}).get("content", "").strip()
+    assistant_text = (first_assistant or {}).get("content", "").strip()
+
+    if not user_text and not assistant_text:
         return "New Chat"
-    
-    content = user_msg.get("content", "").strip()
-    if not content:
-        return "New Chat"
-    
-    # Take first 6-8 meaningful words
-    words = content.split()[:8]
-    title = " ".join(words)
-    if len(content) > len(title):
-        title += "..."
-    
-    return title
+
+    prompt_user = (
+        "User message:\n" + user_text + "\n\nAssistant reply:\n" + assistant_text + "\n\n"
+        "Write a concise, descriptive conversation title (<= 8 words). "
+        "No quotes, no trailing punctuation. Return ONLY the title."
+    )
+
+    try:
+        client = get_client()
+        comp = await client.chat.completions.create(
+            model="gpt-4.1",  # keep consistent with default app model
+            temperature=0.2,
+            messages=[
+                {"role": "system", "content": "You write short, clear titles for conversations."},
+                {"role": "user", "content": prompt_user},
+            ],
+        )
+        title = comp.choices[0].message.content.strip() if comp.choices else ""
+        # Sanitize: cap words and strip quotes/punctuation
+        import re
+        title = re.sub(r'^[\"\'\s]+|[\"\'\s]+$', "", title)
+        words = title.split()
+        if len(words) > 8:
+            title = " ".join(words[:8])
+        title = title.rstrip(".!?，。！？」』\"'")
+        return title or "New Chat"
+    except Exception:
+        # Fallback heuristic (first sentence of assistant or user)
+        text = assistant_text or user_text
+        if not text:
+            return "New Chat"
+        sentence_end = min([i for i in [text.find('.'), text.find('!'), text.find('?')] if i != -1] or [len(text)])
+        first_sentence = text[: sentence_end + 1] if sentence_end < len(text) else text
+        words = first_sentence.split()[:8]
+        return (" ".join(words)).strip() or "New Chat"
 

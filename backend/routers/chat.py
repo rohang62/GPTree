@@ -6,7 +6,7 @@ import uuid
 from typing import List, Dict, Any, Optional
 from datetime import datetime
 
-from llm_providers.openai import stream_chat
+from llm_providers.openai import stream_chat, generate_title
 from supabase_client import get_supabase_client
 
 router = APIRouter()
@@ -42,7 +42,7 @@ async def chat_stream(request: Request):
         "userId": "user-uuid",
         "conversationId": "optional-uuid",
         "messages": [{"role": "user|assistant|system", "content": "..."}],
-        "model": "gpt-4",
+        "model": "gpt-4.1",
         "temperature": 0.7
     }
     """
@@ -51,7 +51,7 @@ async def chat_stream(request: Request):
         user_id = payload.get("userId")
         messages = payload.get("messages", [])
         conversation_id = payload.get("conversationId")
-        model = payload.get("model", "gpt-4")
+        model = payload.get("model", "gpt-4.1")
         temperature = payload.get("temperature", 0.7)
         
         if not user_id:
@@ -284,6 +284,36 @@ async def chat_stream(request: Request):
                         .eq("conversation_id", conversation_id)\
                         .eq("user_id", user_id)\
                         .execute()
+
+                    # Auto-retitle conversation after first assistant response
+                    try:
+                        conv_title_resp = db_client.table("conversations")\
+                            .select("title")\
+                            .eq("conversation_id", conversation_id)\
+                            .eq("user_id", user_id)\
+                            .single()\
+                            .execute()
+
+                        current_title = conv_title_resp.data.get("title") if conv_title_resp and conv_title_resp.data else None
+
+                        # Compose minimal context for title: first user + assistant reply
+                        title_msgs = []
+                        first_user_msg = next((m for m in openai_messages if m.get("role") == "user" and m.get("content")), None)
+                        if first_user_msg:
+                            title_msgs.append(first_user_msg)
+                        if full_response:
+                            title_msgs.append({"role": "assistant", "content": full_response})
+
+                        if current_title and title_msgs:
+                            new_title = await generate_title(title_msgs)
+                            if new_title and new_title.strip() and new_title.strip() != current_title.strip():
+                                db_client.table("conversations")\
+                                    .update({"title": new_title.strip(), "updated_at": datetime.utcnow().isoformat()})\
+                                    .eq("conversation_id", conversation_id)\
+                                    .eq("user_id", user_id)\
+                                    .execute()
+                    except Exception:
+                        pass
                     
                 except Exception as db_error:
                     # Log error but don't fail the stream - send error event instead
@@ -318,7 +348,7 @@ async def chat_non_stream(payload: dict):
     """
     try:
         messages = payload.get("messages", [])
-        model = payload.get("model", "gpt-4")
+        model = payload.get("model", "gpt-4.1")
         temperature = payload.get("temperature", 0.7)
         
         if not messages:

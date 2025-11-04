@@ -98,11 +98,8 @@ export const MessageList: React.FC<MessageListProps> = ({
         ))}
         {/* Streaming cursor indicator (inline) */}
         {streaming && (
-          <div className="flex gap-4 justify-start">
-            <div className="flex-shrink-0 w-8 h-8 rounded-full bg-green-500 flex items-center justify-center">
-              <Bot size={18} className="text-white" />
-            </div>
-            <div className="max-w-[780px] w-full">
+          <div className="flex justify-start">
+            <div className="max-w-[780px] w-full pl-12">
               <span className="inline-block w-3 h-5 bg-[var(--text-secondary)] animate-pulse align-middle" />
             </div>
           </div>

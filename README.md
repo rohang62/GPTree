@@ -14,6 +14,7 @@ This README explains every major part of the application, the code layout, how t
 - Pagination for conversations and messages (20 per page)
 - Light/dark theme, accessibility improvements, keyboard shortcuts
 - CORS configured for local dev
+ - Automatic conversation retitling via an LLM call after the first assistant reply
 
 ## Architecture
 
@@ -110,7 +111,7 @@ This README explains every major part of the application, the code layout, how t
   - Supabase auth: sign in, sign up (immediate login), sign out, profile load, session change handling, persistence. Clears storage on sign out.
 
 - `src/store/useChatStore.ts`
-  - Conversations/messages state, theme, model (default: `gpt-4`). Helper actions to add/update/delete items.
+  - Conversations/messages state, theme, model (default: `gpt-4.1`). Helper actions to add/update/delete items.
 
 - `src/lib/api.ts`
   - Typed helpers for backend routes (conversations/messages/chat stream).
@@ -123,6 +124,7 @@ This README explains every major part of the application, the code layout, how t
 
 - `backend/routers/chat.py`
   - `POST /api/chat/stream`: SSE stream of tokens. Formats incoming messages array for the provider, loads full conversation history when `conversationId` is provided, and persists both user and assistant messages.
+  - After streaming completes, the server sends the first user message and the first assistant reply to the LLM to generate a concise title (<= 8 words) and updates the conversation’s title automatically.
   - Sends keep‑alive comments to keep connections healthy.
 
 - `backend/routers/conversations.py`

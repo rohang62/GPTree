@@ -29,7 +29,7 @@ export const SideThreadPanel: React.FC<SideThreadPanelProps> = ({
   const { user } = useAuthStore();
   const [sideMessages, setSideMessages] = React.useState<Message[]>([]);
   // reuse global model/temperature assumptions via constants for now
-  const model = 'gpt-4';
+  const model = 'gpt-4.1';
   const temperature = 0.7;
   const { streaming, content, startStream, stopStream } = useSSEStream();
   const [streamingContent, setStreamingContent] = React.useState('');

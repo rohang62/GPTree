@@ -74,7 +74,7 @@ export async function fetchMessages(
 export async function createConversation(
   userId: string,
   title: string,
-  model: string = 'gpt-4',
+  model: string = 'gpt-4.1',
   temperature: number = 0.7
 ): Promise<Conversation> {
   const response = await fetch(`${API_BASE_URL}/api/conversations`, {
