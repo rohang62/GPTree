@@ -1,0 +1,32 @@
+# macOS
+.DS_Store
+
+# Node / Vite (frontend)
+frontend/node_modules/
+frontend/dist/
+frontend/.vite/
+*.log
+
+# Python (backend)
+backend/venv/
+backend/__pycache__/
+**/__pycache__/
+*.pyc
+
+# Env files (keep local, never commit)
+*.env
+frontend/.env
+backend/.env
+
+# Editor/Tooling
+.vscode/
+.idea/
+
+# Coverage/Build caches
+coverage/
+.pytest_cache/
+
+# Misc
+*.sqlite
+*.db
+
