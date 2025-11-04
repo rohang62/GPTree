@@ -1,5 +1,5 @@
 import React from 'react';
-import { MessageSquare, MoreVertical } from 'lucide-react';
+import { MessageSquare, MoreVertical, X as CloseIcon } from 'lucide-react';
 import { MessageList } from './MessageList';
 import { Composer } from './Composer';
 import { useSSEStream } from '../hooks/useSSEStream';
@@ -146,6 +146,14 @@ export const SideThreadPanel: React.FC<SideThreadPanelProps> = ({
           <span className="text-sm font-medium text-[var(--text-primary)] truncate" title={title}>{title}</span>
         </div>
         <div className="flex items-center gap-1">
+          <button
+            aria-label="Close"
+            onClick={onClose}
+            className="p-1.5 hover:bg-[var(--hover-bg)] rounded transition-colors"
+            title="Close"
+          >
+            <CloseIcon size={18} className="text-[var(--text-secondary)]" />
+          </button>
           {onMinimize ? (
             <button
               aria-label="Minimize"

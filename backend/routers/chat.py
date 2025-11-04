@@ -173,6 +173,71 @@ async def chat_stream(request: Request):
                         for msg in messages
                     ]
         
+        # Persist the latest user message BEFORE starting the model stream to avoid loss on early disconnects
+        try:
+            db_client_prefetch = get_supabase_client()
+            # Ensure conversation exists
+            conv_exists = db_client_prefetch.table("conversations")\
+                .select("conversation_id")\
+                .eq("conversation_id", conversation_id)\
+                .eq("user_id", user_id)\
+                .execute()
+
+            if not conv_exists.data or len(conv_exists.data) == 0:
+                title_prefetch = openai_messages[0]["content"][:50] + "..." if openai_messages and openai_messages[0].get("content") else "New Chat"
+                db_client_prefetch.table("conversations")\
+                    .insert({
+                        "conversation_id": conversation_id,
+                        "user_id": user_id,
+                        "title": title_prefetch,
+                        "model": model,
+                        "temperature": temperature,
+                    })\
+                    .execute()
+
+            # Save the new user message from payload (most reliable signal) if present and not already the latest in DB
+            new_user_msg_from_payload = None
+            if isinstance(messages, list) and len(messages) > 0:
+                for m in reversed(messages):
+                    if m.get("role") == "user" and (m.get("content") or "").strip():
+                        new_user_msg_from_payload = m
+                        break
+            candidate_content = None
+            if new_user_msg_from_payload:
+                candidate_content = new_user_msg_from_payload["content"].strip()
+            else:
+                # Fallback: derive from assembled history
+                for m in reversed(openai_messages):
+                    if m.get("role") == "user" and (m.get("content") or "").strip():
+                        candidate_content = m["content"].strip()
+                        break
+            if candidate_content:
+                last_in_db = db_client_prefetch.table("messages")\
+                    .select("role,content")\
+                    .eq("conversation_id", conversation_id)\
+                    .eq("user_id", user_id)\
+                    .order("created_at", desc=True)\
+                    .limit(1)\
+                    .execute()
+                should_insert = True
+                if last_in_db.data and len(last_in_db.data) > 0:
+                    last_row = last_in_db.data[0]
+                    if last_row.get("role") == "user" and (last_row.get("content") or "").strip() == candidate_content:
+                        should_insert = False
+                if should_insert:
+                    db_client_prefetch.table("messages")\
+                        .insert({
+                            "message_id": str(uuid.uuid4()),
+                            "conversation_id": conversation_id,
+                            "user_id": user_id,
+                            "role": "user",
+                            "content": candidate_content,
+                        })\
+                        .execute()
+        except Exception:
+            # Continue streaming even if pre-save fails; final block will emit an error event
+            pass
+
         async def generate_stream():
             full_response = ""
             import asyncio

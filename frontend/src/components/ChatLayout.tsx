@@ -183,9 +183,29 @@ export const ChatLayout: React.FC = () => {
         setCurrentConversationId(streamConversationId);
         // Reload conversations to get the new one
         loadConversations(1, true);
+        // Also load messages so the newest assistant message has a stable message_id
+        setTimeout(() => {
+          loadMessages(streamConversationId, 1, true);
+        }, 0);
+      } else if (currentConversationId) {
+        // Existing conversation: reload messages so the most recent assistant message has message_id
+        setTimeout(() => {
+          loadMessages(currentConversationId, 1, true);
+        }, 0);
       }
     }
   }, [content, streaming, streamConversationId]);
+
+  // Helper to compare conversations for equality
+  const conversationsEqual = (a: Conversation[], b: Conversation[]): boolean => {
+    if (a.length !== b.length) return false;
+    return a.every((convA, idx) => {
+      const convB = b[idx];
+      return convA.conversation_id === convB.conversation_id &&
+             convA.title === convB.title &&
+             convA.updated_at === convB.updated_at;
+    });
+  };
 
   const loadConversations = async (page: number = 1, reset: boolean = false) => {
     if (!user || conversationsLoading) return;
@@ -193,10 +213,28 @@ export const ChatLayout: React.FC = () => {
     setConversationsLoading(true);
     try {
       const result = await fetchConversations(user.id, page, 20);
+      let newConversations: Conversation[];
       if (reset) {
-        setConversations(result.data);
+        newConversations = result.data;
+        // Only update if conversations actually changed
+        if (conversationsEqual(newConversations, conversations)) {
+          setConversationsHasMore(result.pagination.has_more);
+          setConversationsPage(page);
+          setConversationsLoading(false);
+          return;
+        }
+        setConversations(newConversations);
       } else {
-        setConversations([...conversations, ...result.data]);
+        // For pagination, append new conversations
+        newConversations = [...conversations, ...result.data];
+        // Only update if pagination actually added new conversations
+        if (result.data.length === 0 || conversationsEqual(newConversations, conversations)) {
+          setConversationsHasMore(result.pagination.has_more);
+          setConversationsPage(page);
+          setConversationsLoading(false);
+          return;
+        }
+        setConversations(newConversations);
       }
       setConversationsHasMore(result.pagination.has_more);
       setConversationsPage(page);
@@ -205,6 +243,18 @@ export const ChatLayout: React.FC = () => {
     } finally {
       setConversationsLoading(false);
     }
+  };
+
+  // Helper to compare messages for equality
+  const messagesEqual = (a: Message[], b: Message[]): boolean => {
+    if (a.length !== b.length) return false;
+    return a.every((msgA, idx) => {
+      const msgB = b[idx];
+      return msgA.message_id === msgB.message_id &&
+             msgA.role === msgB.role &&
+             msgA.content === msgB.content &&
+             JSON.stringify(msgA.indices_for_button || []) === JSON.stringify(msgB.indices_for_button || []);
+    });
   };
 
   const loadMessages = async (conversationId: string, page: number = 1, reset: boolean = false) => {
@@ -221,11 +271,28 @@ export const ChatLayout: React.FC = () => {
         indices_for_button: msg.indices_for_button,
       }));
       
+      let newMessages: Message[];
       if (reset) {
-        setMessages(formattedMessages);
+        newMessages = formattedMessages;
+        // Only update if messages actually changed
+        if (messagesEqual(newMessages, messages)) {
+          setMessagesHasMore(result.pagination.has_more);
+          setMessagesPage(page);
+          setMessagesLoading(false);
+          return;
+        }
+        setMessages(newMessages);
       } else {
         // For pagination, prepend older messages (since we load from oldest)
-        setMessages([...formattedMessages, ...messages]);
+        newMessages = [...formattedMessages, ...messages];
+        // Only update if pagination actually added new messages
+        if (formattedMessages.length === 0 || messagesEqual(newMessages, messages)) {
+          setMessagesHasMore(result.pagination.has_more);
+          setMessagesPage(page);
+          setMessagesLoading(false);
+          return;
+        }
+        setMessages(newMessages);
       }
       setMessagesHasMore(result.pagination.has_more);
       setMessagesPage(page);
@@ -358,29 +425,62 @@ export const ChatLayout: React.FC = () => {
     });
   };
 
-  const handleTextSelect = async (messageId: string, text: string, startIndex: number, endIndex: number) => {
+  const handleTextSelect = async (messageId: string | undefined, text: string, startIndex: number, endIndex: number) => {
     if (!user || !currentConversationId) return;
     
     try {
+      let parentMessageId = messageId;
+      if (!parentMessageId) {
+        // Try to resolve to the latest assistant message with an id
+        const candidate = [...messages].reverse().find(m => m.role === 'assistant' && !!m.message_id);
+        if (candidate && candidate.message_id) {
+          parentMessageId = candidate.message_id;
+        } else {
+          // Force a quick reload and retry once
+          await loadMessages(currentConversationId, 1, true);
+          const recheck = [...useChatStore.getState().messages].reverse().find(m => m.role === 'assistant' && !!m.message_id);
+          if (recheck && recheck.message_id) parentMessageId = recheck.message_id;
+        }
+      }
+      if (!parentMessageId) return; // still no id; abort silently
+
       // Create side thread
       const result = await createSideThread(
         user.id,
-        messageId,
+        parentMessageId,
         currentConversationId,
         text,
         startIndex,
         endIndex
       );
       
-      // Open side thread panel (push to stack)
-      setSideThreads(prev => ([
-        ...prev,
-        {
-          conversationId: result.conversation.conversation_id,
-          parentConversationId: currentConversationId,
-          parentMessageId: messageId,
+      const newThreadId = result.conversation.conversation_id;
+      
+      // Check if already open or minimized before adding
+      if (sideThreads.some(st => st.conversationId === newThreadId)) {
+        // Already open, do nothing
+      } else if (minimizedThreads.some(mt => mt.conversationId === newThreadId)) {
+        // If minimized, unminimize it
+        const minExists = minimizedThreads.find(mt => mt.conversationId === newThreadId);
+        if (minExists) {
+          setMinimizedThreads(prev => prev.filter(x => x.conversationId !== newThreadId));
+          setSideThreads(prev => [...prev, {
+            conversationId: minExists.conversationId,
+            parentConversationId: minExists.parentConversationId,
+            parentMessageId: minExists.parentMessageId,
+          }]);
         }
-      ]));
+      } else {
+        // Open side thread panel (push to stack)
+        setSideThreads(prev => ([
+          ...prev,
+          {
+            conversationId: newThreadId,
+            parentConversationId: currentConversationId,
+            parentMessageId: parentMessageId,
+          }
+        ]));
+      }
       
       // Reload messages to show the new button
       if (currentConversationId) {
@@ -392,7 +492,24 @@ export const ChatLayout: React.FC = () => {
   };
 
   const handleButtonClick = (conversationId: string) => {
-    // Push an existing side thread id (if user clicks an inline side-thread button)
+    // Check if already open in side threads - do nothing
+    if (sideThreads.some(t => t.conversationId === conversationId)) {
+      return;
+    }
+    
+    // Check if minimized - if so, unminimize it
+    const minimized = minimizedThreads.find(mt => mt.conversationId === conversationId);
+    if (minimized) {
+      setMinimizedThreads(prev => prev.filter(x => x.conversationId !== conversationId));
+      setSideThreads(prev => [...prev, {
+        conversationId: minimized.conversationId,
+        parentConversationId: minimized.parentConversationId,
+        parentMessageId: minimized.parentMessageId,
+      }]);
+      return;
+    }
+    
+    // Otherwise, open it as a new side thread
     setSideThreads(prev => ([...prev, {
       conversationId,
       parentConversationId: currentConversationId || '',
@@ -620,11 +737,27 @@ export const ChatLayout: React.FC = () => {
                 parentConversationId={t.parentConversationId}
                 parentMessageId={t.parentMessageId}
                 onClose={() => setSideThreads(prev => prev.filter(x => x.conversationId !== t.conversationId))}
-                onOpenChild={(childId, parentMsgId) => setSideThreads(prev => ([...prev, {
-                  conversationId: childId,
-                  parentConversationId: t.conversationId,
-                  parentMessageId: parentMsgId || '',
-                }]))}
+                onOpenChild={(childId, parentMsgId) => {
+                  // Check if already open or minimized
+                  if (sideThreads.some(st => st.conversationId === childId)) return;
+                  const minExists = minimizedThreads.find(mt => mt.conversationId === childId);
+                  if (minExists) {
+                    // Unminimize it
+                    setMinimizedThreads(prev => prev.filter(x => x.conversationId !== childId));
+                    setSideThreads(prev => [...prev, {
+                      conversationId: minExists.conversationId,
+                      parentConversationId: minExists.parentConversationId,
+                      parentMessageId: minExists.parentMessageId,
+                    }]);
+                    return;
+                  }
+                  // Otherwise add it
+                  setSideThreads(prev => ([...prev, {
+                    conversationId: childId,
+                    parentConversationId: t.conversationId,
+                    parentMessageId: parentMsgId || '',
+                  }]));
+                }}
                 onMinimize={(titleFromPanel?: string) => {
                   // calculate current horizontal offset from the right for this panel
                   const GAP = 8; // px gap between panels
@@ -652,6 +785,12 @@ export const ChatLayout: React.FC = () => {
               <button
                 className="flex-1 text-sm text-[var(--text-primary)] text-left overflow-hidden text-ellipsis whitespace-nowrap"
                 onClick={() => {
+                  // Check if already open - if so, just remove from minimized
+                  if (sideThreads.some(st => st.conversationId === mt.conversationId)) {
+                    setMinimizedThreads(prev => prev.filter(x => x.conversationId !== mt.conversationId));
+                    return;
+                  }
+                  // Otherwise unminimize it
                   setMinimizedThreads(prev => prev.filter(x => x.conversationId !== mt.conversationId));
                   setSideThreads(prev => [...prev, { conversationId: mt.conversationId, parentConversationId: mt.parentConversationId, parentMessageId: mt.parentMessageId }]);
                 }}

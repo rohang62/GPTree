@@ -109,71 +109,77 @@ export const Markdown: React.FC<MarkdownProps> = ({
     };
   }, [onTextSelect]);
 
-  // Process content to insert buttons
-  const processContentWithButtons = () => {
-    if (!buttonIndices || buttonIndices.length === 0) {
-      return content;
-    }
+  // After markdown renders, wrap exact (start,end) ranges once across the whole container
+  React.useEffect(() => {
+    const root = containerRef.current;
+    if (!root) return;
 
-    // Sort buttons by start index (descending) to insert from end to start
-    const sortedButtons = [...buttonIndices].sort((a, b) => b.start - a.start);
-    
-    let result = content;
-    sortedButtons.forEach((button) => {
-      const before = result.substring(0, button.start);
-      const buttonText = result.substring(button.start, button.end);
-      const after = result.substring(button.end);
-      
-      // Create a unique marker for the button
-      const marker = `__SIDE_THREAD_BUTTON_${button.start}_${button.end}__`;
-      result = `${before}${marker}${after}`;
-    });
+    // Cleanup previous wraps
+    const cleanup = () => {
+      const spans = root.querySelectorAll('span[data-sidebtn="true"]');
+      spans.forEach((el) => {
+        const parent = el.parentNode as Node | null;
+        if (!parent) return;
+        const fragment = document.createDocumentFragment();
+        while (el.firstChild) fragment.appendChild(el.firstChild);
+        parent.replaceChild(fragment, el);
+      });
+    };
 
-    return result;
-  };
+    cleanup();
+    if (!buttonIndices || buttonIndices.length === 0) return;
 
-  // Custom component for text that handles button rendering
-  const TextWithButtons: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-    if (!buttonIndices || buttonIndices.length === 0 || typeof children !== 'string') {
-      return <>{children}</>;
-    }
+    const rafId = requestAnimationFrame(() => {
+      if (!containerRef.current) return;
+      const rootNow = containerRef.current;
 
-    const text = String(children);
-    const parts: React.ReactNode[] = [];
-    let lastIndex = 0;
-
-    // Sort buttons by start index
-    const sortedButtons = [...buttonIndices].sort((a, b) => a.start - b.start);
-
-    sortedButtons.forEach((button, idx) => {
-      // Add text before button
-      if (button.start > lastIndex) {
-        parts.push(text.substring(lastIndex, button.start));
+      // Collect text nodes with cumulative offsets
+      const textNodes: { node: Text; start: number; end: number }[] = [];
+      let cursor = 0;
+      const walker = document.createTreeWalker(rootNow, NodeFilter.SHOW_TEXT);
+      while (walker.nextNode()) {
+        const n = walker.currentNode as Text;
+        const len = n.nodeValue?.length || 0;
+        if (len > 0) {
+          textNodes.push({ node: n, start: cursor, end: cursor + len });
+          cursor += len;
+        }
       }
 
-      // Add button
-      const buttonText = text.substring(button.start, button.end);
-      parts.push(
-        <button
-          key={`btn-${idx}`}
-          onClick={() => onButtonClick?.(button.conversation_id)}
-          className="inline-flex items-center gap-1 px-2 py-0.5 mx-0.5 rounded bg-blue-500/20 hover:bg-blue-500/30 text-blue-400 border border-blue-500/30 cursor-pointer transition-colors"
-        >
-          {buttonText}
-          <MessageSquare size={12} />
-        </button>
-      );
+      const wrapRange = (start: number, end: number, conversationId: string) => {
+        const rangeKey = `${start}-${end}`;
+        if (rootNow.querySelector(`span[data-sidebtn="true"][data-range-key="${rangeKey}"]`)) return;
+        const startEntry = textNodes.find(t => start >= t.start && start < t.end);
+        const endEntry = textNodes.find(t => end > t.start && end <= t.end) || startEntry;
+        if (!startEntry || !endEntry) return;
 
-      lastIndex = button.end;
+        const r = document.createRange();
+        r.setStart(startEntry.node, Math.max(0, start - startEntry.start));
+        r.setEnd(endEntry.node, Math.max(0, Math.min((endEntry.node.nodeValue?.length || 0), end - endEntry.start)));
+        try {
+          const span = document.createElement('span');
+          span.setAttribute('data-sidebtn', 'true');
+          span.setAttribute('data-range-key', rangeKey);
+          span.className = 'inline-flex items-center px-1.5 py-0.5 rounded border border-blue-500/40 bg-blue-500/15 hover:bg-blue-500/25 text-blue-400 cursor-pointer transition-colors';
+          span.addEventListener('click', (e) => {
+            e.stopPropagation();
+            onButtonClick?.(conversationId);
+          });
+          r.surroundContents(span);
+        } catch {}
+      };
+
+      // Deduplicate by (start,end)
+      const unique = new Map<string, { start: number; end: number; conversation_id: string }>();
+      for (const b of buttonIndices) unique.set(`${b.start}-${b.end}`, { start: b.start, end: b.end, conversation_id: b.conversation_id });
+      Array.from(unique.values()).sort((a, b) => b.start - a.start).forEach(b => wrapRange(b.start, b.end, b.conversation_id));
     });
 
-    // Add remaining text
-    if (lastIndex < text.length) {
-      parts.push(text.substring(lastIndex));
-    }
-
-    return <>{parts}</>;
-  };
+    return () => {
+      cancelAnimationFrame(rafId);
+      cleanup();
+    };
+  }, [content, buttonIndices, onButtonClick]);
 
   return (
     <div ref={containerRef} className="relative">
@@ -243,17 +249,9 @@ export const Markdown: React.FC<MarkdownProps> = ({
               </code>
             );
           },
-          p: ({ children }) => {
-            // For paragraphs, we need to process text nodes to insert buttons
-            if (buttonIndices && buttonIndices.length > 0) {
-              return (
-                <p className="mb-4 last:mb-0">
-                  <TextWithButtons>{children}</TextWithButtons>
-                </p>
-              );
-            }
-            return <p className="mb-4 last:mb-0">{children}</p>;
-          },
+          p: ({ children }) => (
+            <p className="mb-4 last:mb-0">{children}</p>
+          ),
           h1: ({ children }) => (
             <h1 className="text-2xl font-bold mb-4 mt-6">{children}</h1>
           ),
