@@ -271,12 +271,45 @@ async def delete_conversation(
     """Delete a conversation and all its messages (cascade delete)"""
     try:
         supabase = get_supabase_client()
-        response = supabase.table("conversations")\
+
+        # Fetch conversation to see if it's a side thread and to locate parent message
+        conv_resp = supabase.table("conversations")\
+            .select("is_side_thread,parent_message_id,parent_conversation_id")\
+            .eq("conversation_id", conversation_id)\
+            .eq("user_id", user_id)\
+            .single()\
+            .execute()
+
+        if conv_resp.data and conv_resp.data.get("is_side_thread") and conv_resp.data.get("parent_message_id"):
+            parent_msg_id = conv_resp.data.get("parent_message_id")
+            try:
+                # Load parent message's indices and remove this button
+                pm_resp = supabase.table("messages")\
+                    .select("message_id,indices_for_button")\
+                    .eq("message_id", parent_msg_id)\
+                    .eq("user_id", user_id)\
+                    .single()\
+                    .execute()
+                indices = pm_resp.data.get("indices_for_button") if pm_resp and pm_resp.data else []
+                if isinstance(indices, list) and len(indices) > 0:
+                    filtered = [i for i in indices if i.get("conversation_id") != conversation_id]
+                    if filtered != indices:
+                        supabase.table("messages")\
+                            .update({"indices_for_button": filtered})\
+                            .eq("message_id", parent_msg_id)\
+                            .eq("user_id", user_id)\
+                            .execute()
+            except Exception:
+                # Non-fatal; continue with delete
+                pass
+
+        # Now delete conversation (messages should cascade via FK)
+        supabase.table("conversations")\
             .delete()\
             .eq("conversation_id", conversation_id)\
             .eq("user_id", user_id)\
             .execute()
-        
+
         return {"success": True}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))

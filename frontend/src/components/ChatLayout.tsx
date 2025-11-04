@@ -50,6 +50,7 @@ export const ChatLayout: React.FC = () => {
   const conversationsScrollRef = useRef<HTMLDivElement>(null);
   const messagesScrollRef = useRef<HTMLDivElement>(null);
   const [streamingContent, setStreamingContent] = useState('');
+  const [composerFocusTick, setComposerFocusTick] = useState(0);
   
   // Side thread stack (rendered right-docked side-by-side)
   const [sideThreads, setSideThreads] = useState<Array<{
@@ -335,6 +336,7 @@ export const ChatLayout: React.FC = () => {
     setMessages([]);
     setMessagesPage(1);
     setMessagesHasMore(true);
+    setComposerFocusTick((t) => t + 1);
   };
 
   const handleSelectConversation = (id: string) => {
@@ -722,6 +724,7 @@ export const ChatLayout: React.FC = () => {
               onSend={handleSend}
               streaming={streaming}
               onStop={handleStop}
+              focusSignal={composerFocusTick}
             />
           </div>
         </div>
@@ -769,6 +772,16 @@ export const ChatLayout: React.FC = () => {
                   const convTitle = titleFromPanel || (conversations.find(c => c.conversation_id === t.conversationId)?.title) || 'Side thread';
                   setSideThreads(prev => prev.filter(x => x.conversationId !== t.conversationId));
                   setMinimizedThreads(prev => [...prev, { ...t, title: convTitle, rightOffsetPx: offset, panelWidthPx: (sideWidths[i] || 360) }]);
+                }}
+                onDeleted={(deletedId) => {
+                  // Remove inline buttons locally for the deleted side thread
+                  const updated = (messages || []).map((m) => ({
+                    ...m,
+                    indices_for_button: (m.indices_for_button || []).filter((b: any) => b.conversation_id !== deletedId)
+                  }));
+                  setMessages(updated);
+                  // Also remove minimized chip if exists
+                  setMinimizedThreads(prev => prev.filter(x => x.conversationId !== deletedId));
                 }}
                 widthPx={sideWidths[i] || 360}
               />

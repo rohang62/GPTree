@@ -6,9 +6,10 @@ interface ComposerProps {
   onSend: (message: string) => void;
   streaming: boolean;
   onStop: () => void;
+  focusSignal?: number; // increment to force focus
 }
 
-export const Composer: React.FC<ComposerProps> = ({ onSend, streaming, onStop }) => {
+export const Composer: React.FC<ComposerProps> = ({ onSend, streaming, onStop, focusSignal }) => {
   const [input, setInput] = useState('');
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const { model } = useChatStore();
@@ -17,6 +18,12 @@ export const Composer: React.FC<ComposerProps> = ({ onSend, streaming, onStop })
     // Focus composer on mount and after sending
     textareaRef.current?.focus();
   }, []);
+
+  useEffect(() => {
+    if (typeof focusSignal !== 'undefined') {
+      textareaRef.current?.focus();
+    }
+  }, [focusSignal]);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();

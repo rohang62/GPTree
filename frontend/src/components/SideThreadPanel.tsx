@@ -2,6 +2,7 @@ import React from 'react';
 import { MessageSquare, MoreVertical, X as CloseIcon } from 'lucide-react';
 import { MessageList } from './MessageList';
 import { Composer } from './Composer';
+import { Markdown } from './Markdown';
 import { useSSEStream } from '../hooks/useSSEStream';
 // Local state for side thread to avoid polluting main thread store
 import { useAuthStore } from '../store/useAuthStore';
@@ -15,6 +16,7 @@ interface SideThreadPanelProps {
   onOpenChild?: (childConversationId: string, parentMessageId?: string) => void;
   widthPx?: number;
   onMinimize?: (title?: string) => void;
+  onDeleted?: (deletedConversationId: string) => void;
 }
 
 export const SideThreadPanel: React.FC<SideThreadPanelProps> = ({
@@ -25,6 +27,7 @@ export const SideThreadPanel: React.FC<SideThreadPanelProps> = ({
   onOpenChild,
   widthPx,
   onMinimize,
+  onDeleted,
 }) => {
   const { user } = useAuthStore();
   const [sideMessages, setSideMessages] = React.useState<Message[]>([]);
@@ -140,12 +143,12 @@ export const SideThreadPanel: React.FC<SideThreadPanelProps> = ({
   return (
     <div className="h-full bg-[var(--sidebar-bg)] border-l border-[var(--border-color)] flex flex-col shadow-xl overflow-hidden" style={{ width: widthPx ? `${widthPx}px` : undefined }}>
       {/* Header */}
-      <div className="flex items-center justify-between px-4 py-3 border-b border-[var(--border-color)] relative">
-        <div className="flex items-center gap-2">
-          <MessageSquare size={18} className="text-blue-400" />
-          <span className="text-sm font-medium text-[var(--text-primary)] truncate" title={title}>{title}</span>
+      <div className="flex items-center justify-between px-4 py-3 border-b border-[var(--border-color)] relative gap-2">
+        <div className="flex items-center gap-2 min-w-0 flex-1">
+          <MessageSquare size={18} className="text-blue-400 flex-shrink-0" />
+          <span className="text-sm font-medium text-[var(--text-primary)] truncate min-w-0" title={title}>{title}</span>
         </div>
-        <div className="flex items-center gap-1">
+        <div className="flex items-center gap-1 flex-shrink-0">
           <button
             aria-label="Close"
             onClick={onClose}
@@ -194,6 +197,7 @@ export const SideThreadPanel: React.FC<SideThreadPanelProps> = ({
                 if (!user) return;
                 try {
                   await deleteConversation(conversationId, user.id);
+                  onDeleted?.(conversationId);
                   onClose();
                 } catch {}
               }}
@@ -216,7 +220,12 @@ export const SideThreadPanel: React.FC<SideThreadPanelProps> = ({
           <div className="px-4 py-2">
             <div className="max-w-[780px] mx-auto">
               <div className="text-[var(--text-primary)] leading-7">
-                {streamingContent}
+                {/* Render streaming markdown incrementally like the main thread */}
+                <Markdown 
+                  content={streamingContent}
+                  // No messageId yet for the streaming assistant message
+                  buttonIndices={null}
+                />
                 <span className="inline-block w-3 h-5 bg-[var(--text-secondary)] animate-pulse align-middle ml-1" />
               </div>
             </div>
